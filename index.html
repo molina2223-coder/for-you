@@ -27,11 +27,46 @@
       width: 100vw;
       height: 100dvh;
     }
+    #introOverlay {
+      position: fixed;
+      inset: 0;
+      background-color: #0b0b0e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      z-index: 20;
+      cursor: pointer;
+      transition: opacity 0.9s ease, visibility 0.9s ease;
+    }
+    #introOverlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .pulse-heart {
+      font-size: 32px;
+      color: #ffafaf;
+      text-shadow: 0 0 18px rgba(255, 175, 175, 0.65);
+      animation: heartbeat 1.8s ease-in-out infinite;
+    }
+    .tap-label {
+      color: #ffd7d7;
+      font-size: 14px;
+      letter-spacing: 0.14em;
+      text-transform: lowercase;
+      opacity: 0.78;
+    }
+    @keyframes heartbeat {
+      0%, 100% { transform: scale(1); opacity: 0.85; }
+      50% { transform: scale(1.16); opacity: 1; }
+    }
     #dedica {
       position: fixed;
       bottom: max(22px, env(safe-area-inset-bottom, 22px));
       left: 50%;
-      transform: translateX(-50%);
+      transform: translateX(-50%) translateY(10px);
       width: 92vw;
       text-align: center;
       color: #ffd7d7;
@@ -42,18 +77,30 @@
       text-shadow: 0 0 10px rgba(255, 175, 175, 0.45);
       pointer-events: none;
       z-index: 10;
+      opacity: 0;
+      transition: opacity 1.4s ease, transform 1.4s ease;
+    }
+    #dedica.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
     }
   </style>
 </head>
 <body>
+  <div id="introOverlay">
+    <div class="pulse-heart">♥</div>
+    <div class="tap-label">tocca per aprire</div>
+  </div>
+
   <canvas id="asciiCanvas"></canvas>
   <div id="dedica">So quanto ami i fiori,<br>questi non appassiranno mai ♥</div>
 
   <script>
     const canvas = document.getElementById("asciiCanvas");
     const ctx = canvas.getContext("2d");
+    const introOverlay = document.getElementById("introOverlay");
+    const dedicaEl = document.getElementById("dedica");
 
-    // Palette colori fedele alla versione terminale
     const COLORS = {
       KRAFT_LIGHT: "#d7af87",
       KRAFT_MID: "#af875f",
@@ -129,7 +176,6 @@
       return [x1, y2, z2];
     }
 
-    // Generatore pseudo-casuale deterministico
     function mulberry32(seed) {
       return function() {
         let t = seed += 0x6D2B79F5;
@@ -231,7 +277,6 @@
       const pts = [];
       const rand = mulberry32(77);
 
-      // 1. Carta kraft esterna
       const vSteps = 120;
       const uSteps = 190;
       for (let iv = 0; iv < vSteps; iv++) {
@@ -274,7 +319,6 @@
         }
       }
 
-      // 2. Carta velina rosa cipria interna
       for (let iv = 0; iv < 85; iv++) {
         const t = iv / 84.0;
         const yBase = -0.92 + t * 1.46;
@@ -301,7 +345,6 @@
 
       addWhiteBow(pts, -0.92, 0.33);
 
-      // 3. Base verde scura compatta
       for (let r_i = 0; r_i < 10; r_i++) {
         const rt = r_i / 9.0;
         const rad = 0.10 + rt * 0.46;
@@ -315,7 +358,6 @@
         }
       }
 
-      // 4. Rose scolpite 3D
       function addRose(center, tiltDir, tiltAngle, radius, colSpec, colHi, colMid, colSh) {
         const axis = norm([
           Math.sin(tiltAngle) * Math.cos(tiltDir),
@@ -382,7 +424,6 @@
         }
       }
 
-      // 5. Crisantemi pompon sferici 3D
       function addPompon(center, tiltDir, tiltAngle, radius) {
         const axis = norm([
           Math.sin(tiltAngle) * Math.cos(tiltDir),
@@ -452,7 +493,6 @@
         });
       }
 
-      // Disposizione fiori
       addRose([-0.14, 0.88, 0.02], 1.45, 0.46, 0.29, COLORS.ROSE_BLUSH_SPEC, COLORS.ROSE_BLUSH_HI, COLORS.ROSE_BLUSH_MID, COLORS.ROSE_BLUSH_SH);
       addRose([-0.32, 0.64, 0.28], 1.70, 0.62, 0.32, COLORS.ROSE_RED_SPEC, COLORS.ROSE_RED_HI, COLORS.ROSE_RED_MID, COLORS.ROSE_RED_SH);
       addRose([-0.58, 0.42, 0.34], 2.05, 0.75, 0.27, COLORS.ROSE_BLUSH_SPEC, COLORS.ROSE_BLUSH_HI, COLORS.ROSE_BLUSH_MID, COLORS.ROSE_BLUSH_SH);
@@ -466,7 +506,6 @@
       addPompon([-0.05, 0.24, 0.63], 1.55, 0.88, 0.20);
       addPompon([0.16, 0.07, 0.62], 1.32, 0.95, 0.21);
 
-      // Foglie discrete dietro alle rose
       const leaves = [
         [-0.22, 0.78, -0.18, 1.85, 0.42],
         [0.18, 0.76, -0.20, 1.25, 0.44],
@@ -495,7 +534,6 @@
         }
       }
 
-      // Particelle luminose
       const sparklePalette = [COLORS.ROSE_BLUSH_HI, COLORS.MUM_LIME_HI, COLORS.VELLUM_EDGE];
       const sparkles = [];
       for (let i = 0; i < 14; i++) {
@@ -527,7 +565,6 @@
       canvas.height = vh * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Adatta la densità della griglia ASCII allo schermo (funziona sia su telefono che su PC)
       const targetCols = vw < 600 ? 78 : 130;
       charW = vw / targetCols;
       charH = charW * 1.85;
@@ -541,13 +578,37 @@
     window.addEventListener("resize", resize);
     resize();
 
+    let started = false;
+    let openTime = 0;
+    let dedicaShown = false;
+
+    function startExperience() {
+      if (started) return;
+      started = true;
+      openTime = performance.now();
+      introOverlay.classList.add("hidden");
+    }
+
+    introOverlay.addEventListener("click", startExperience);
+    introOverlay.addEventListener("touchstart", startExperience, { passive: true });
+
     let t = 0.0;
     let lastTime = 0;
 
     function animate(now) {
       requestAnimationFrame(animate);
-      if (now - lastTime < 32) return; // ~30 fps fluidi
+      if (!started) return;
+      if (now - lastTime < 32) return;
       lastTime = now;
+
+      const elapsed = (now - openTime) / 1000.0;
+      const bloomRaw = Math.min(1.0, elapsed / 1.4);
+      const bloom = 1 - Math.pow(1 - bloomRaw, 3);
+
+      if (elapsed >= 0.9 && !dedicaShown) {
+        dedicaShown = true;
+        dedicaEl.classList.add("visible");
+      }
 
       const vw = window.innerWidth;
       const vh = window.innerHeight;
@@ -560,7 +621,7 @@
       const colBuf = new Array(size).fill("");
 
       const angleY = -0.15 + 0.55 * Math.sin(t);
-      const scale = Math.min(cols * 0.46, (rows - 5) * 0.86);
+      const scale = Math.min(cols * 0.46, (rows - 5) * 0.86) * (0.12 + 0.88 * bloom);
       const aspectY = 0.52;
 
       for (let i = 0; i < pts.length; i++) {
@@ -608,7 +669,6 @@
         }
       }
 
-      // Disegno griglia ASCII su Canvas
       const offsetX = (vw - cols * charW) * 0.5;
       const offsetY = (vh - rows * charH) * 0.5;
 
@@ -625,8 +685,6 @@
         }
       }
 
-
-
       t += 0.045;
     }
 
@@ -634,4 +692,3 @@
   </script>
 </body>
 </html>
-
