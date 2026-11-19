@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Per te ♥</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background-color: #0b0b0e;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Courier New", Courier, monospace;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100dvh;
+    }
+    #dedica {
+      position: fixed;
+      bottom: max(22px, env(safe-area-inset-bottom, 22px));
+      left: 50%;
+      transform: translateX(-50%);
+      width: 92vw;
+      text-align: center;
+      color: #ffd7d7;
+      font-family: "Courier New", Courier, monospace;
+      font-weight: bold;
+      font-size: clamp(14px, 3.8vw, 20px);
+      line-height: 1.35;
+      text-shadow: 0 0 10px rgba(255, 175, 175, 0.45);
+      pointer-events: none;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="asciiCanvas"></canvas>
+  <div id="dedica">So quanto ami i fiori,<br>questi non appassiranno mai ♥</div>
+
+  <script>
+    const canvas = document.getElementById("asciiCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Palette colori fedele alla versione terminale
+    const COLORS = {
+      KRAFT_LIGHT: "#d7af87",
+      KRAFT_MID: "#af875f",
+      KRAFT_DARK: "#875f00",
+      VELLUM_PINK: "#ffd7d7",
+      VELLUM_EDGE: "#ffffff",
+
+      BOW_WHITE_HI: "#ffffff",
+      BOW_WHITE_MID: "#d0d0d0",
+      BOW_WHITE_SH: "#8a8a8a",
+
+      ROSE_BLUSH_SPEC: "#ffffff",
+      ROSE_BLUSH_HI: "#ffd7d7",
+      ROSE_BLUSH_MID: "#ffafaf",
+      ROSE_BLUSH_SH: "#d75f87",
+
+      ROSE_RED_SPEC: "#ff8787",
+      ROSE_RED_HI: "#ff5f5f",
+      ROSE_RED_MID: "#ff0000",
+      ROSE_RED_SH: "#5f0000",
+
+      MUM_WHITE_HI: "#ffffff",
+      MUM_WHITE_MID: "#c6c6c6",
+      MUM_WHITE_SH: "#585858",
+      MUM_LIME_HI: "#afff00",
+      MUM_LIME_SH: "#5f5f00",
+
+      LEAF_DARK: "#005f00",
+      LEAF_SHINE: "#008700"
+    };
+
+    const SHADE_CHARS = " .:-=+*#%@";
+
+    function norm(v) {
+      const l = Math.hypot(v[0], v[1], v[2]);
+      return l > 1e-9 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 1, 0];
+    }
+
+    function dot(a, b) {
+      return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    }
+
+    function cross(a, b) {
+      return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+      ];
+    }
+
+    function add(a, b) {
+      return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+    }
+
+    function mul(a, s) {
+      return [a[0] * s, a[1] * s, a[2] * s];
+    }
+
+    function rotateVec(v, ay, ax = 0.40, az = 0.16) {
+      const [x, y, z] = v;
+      const cz = Math.cos(az), sz = Math.sin(az);
+      const x0 = x * cz - y * sz;
+      const y0 = x * sz + y * cz;
+      const z0 = z;
+
+      const cy = Math.cos(ay), sy = Math.sin(ay);
+      const x1 = x0 * cy + z0 * sy;
+      const z1 = -x0 * sy + z0 * cy;
+
+      const cx = Math.cos(ax), sx = Math.sin(ax);
+      const y2 = y0 * cx - z1 * sx;
+      const z2 = y0 * sx + z1 * cx;
+      return [x1, y2, z2];
+    }
+
+    // Generatore pseudo-casuale deterministico
+    function mulberry32(seed) {
+      return function() {
+        let t = seed += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+
+    function addWhiteBow(pts, yWaist = -0.92, rWaist = 0.33) {
+      const zFront = rWaist + 0.03;
+
+      for (let h_i = 0; h_i < 7; h_i++) {
+        const ht = (h_i / 6.0) - 0.5;
+        const bandY = yWaist + ht * 0.11;
+        for (let u_i = 0; u_i < 90; u_i++) {
+          const theta = (2.0 * Math.PI * u_i) / 90;
+          const rBand = rWaist + 0.022;
+          const bx = rBand * Math.cos(theta);
+          const bz = rBand * Math.sin(theta);
+          const n = norm([Math.cos(theta), 0.0, Math.sin(theta)]);
+          const col = Math.abs(ht) > 0.38 ? COLORS.BOW_WHITE_SH : COLORS.BOW_WHITE_MID;
+          pts.push({ pos: [bx, bandY, bz], n, col, em: 0.45 });
+        }
+      }
+
+      for (let ny_i = -6; ny_i <= 6; ny_i++) {
+        const nyt = ny_i / 6.0;
+        for (let nx_i = -6; nx_i <= 6; nx_i++) {
+          const nxt = nx_i / 6.0;
+          if (nxt * nxt + nyt * nyt <= 1.05) {
+            const dome = Math.sqrt(Math.max(0.0, 1.0 - 0.5 * (nxt * nxt + nyt * nyt)));
+            const px = nxt * 0.085;
+            const py = yWaist + nyt * 0.085;
+            const pz = zFront + 0.035 + dome * 0.055;
+            const n = norm([nxt * 0.6, nyt * 0.6, 1.0]);
+            const col = Math.abs(nxt) > 0.72 ? COLORS.BOW_WHITE_SH : COLORS.BOW_WHITE_HI;
+            pts.push({ pos: [px, py, pz], n, col, em: 0.55 });
+          }
+        }
+      }
+
+      for (const side of [-1.0, 1.0]) {
+        for (let u_i = 0; u_i < 34; u_i++) {
+          const ut = u_i / 33.0;
+          const ang = ut * Math.PI;
+          const loopX = side * (0.06 + 0.36 * Math.sin(ang));
+          const loopYCenter = yWaist + 0.04 * Math.sin(ang);
+          const loopZ = zFront + 0.03 + 0.12 * Math.sin(ang) * Math.sin(ang);
+          const ribbonHalfH = 0.035 + 0.115 * Math.sin(ang);
+
+          for (let w_i = -7; w_i <= 7; w_i++) {
+            const wt = w_i / 7.0;
+            const archZ = 0.025 * (1.0 - wt * wt);
+            const px = loopX;
+            const py = loopYCenter + wt * ribbonHalfH;
+            const pz = loopZ + archZ;
+            const n = norm([side * 0.45, wt * 0.55, 0.85]);
+
+            let col, em;
+            if (ut < 0.18 || ut > 0.82) {
+              col = COLORS.BOW_WHITE_SH;
+              em = 0.25;
+            } else if (Math.abs(wt) > 0.78) {
+              col = COLORS.BOW_WHITE_MID;
+              em = 0.45;
+            } else {
+              col = COLORS.BOW_WHITE_HI;
+              em = 0.65;
+            }
+            pts.push({ pos: [px, py, pz], n, col, em });
+          }
+        }
+      }
+
+      for (const side of [-1.0, 1.0]) {
+        for (let l_i = 0; l_i < 32; l_i++) {
+          const lt = l_i / 31.0;
+          const tailX = side * (0.04 + 0.24 * Math.pow(lt, 1.15));
+          const tailY = yWaist - 0.05 - 0.48 * lt;
+          const tailZ = zFront + 0.045 - 0.03 * lt + 0.025 * Math.sin(lt * Math.PI * 1.5);
+          const halfW = 0.052 + 0.022 * lt;
+
+          for (let w_i = -5; w_i <= 5; w_i++) {
+            const wt = w_i / 5.0;
+            if (lt > 0.86 && Math.abs(wt) < (lt - 0.86) * 4.5) continue;
+            const px = tailX + wt * halfW * 0.92;
+            const py = tailY - side * wt * halfW * 0.35;
+            const pz = tailZ + 0.012 * (1.0 - wt * wt);
+            const n = norm([side * 0.25, 0.15, 0.95]);
+            const col = Math.abs(wt) > 0.75 ? COLORS.BOW_WHITE_MID : COLORS.BOW_WHITE_HI;
+            pts.push({ pos: [px, py, pz], n, col, em: 0.58 });
+          }
+        }
+      }
+    }
+
+    function buildBouquet() {
+      const pts = [];
+      const rand = mulberry32(77);
+
+      // 1. Carta kraft esterna
+      const vSteps = 120;
+      const uSteps = 190;
+      for (let iv = 0; iv < vSteps; iv++) {
+        const t = iv / (vSteps - 1);
+        const yBase = -1.75 + t * 2.30;
+        const waist = 0.08 * Math.exp(-Math.pow((t - 0.36) / 0.11, 2));
+        const rBase = 0.13 + Math.pow(t, 1.20) * 0.96 - waist;
+
+        for (let iu = 0; iu < uSteps; iu++) {
+          const theta = (2.0 * Math.PI * iu) / uSteps;
+          const p1 = Math.max(0.0, 1.0 - Math.abs(theta - (1.5 * Math.PI - 0.48)) * 1.45);
+          const p2 = Math.max(0.0, 1.0 - Math.abs(theta - (1.5 * Math.PI + 0.42)) * 1.45);
+          const backPeaks = (0.74 * p1 + 0.84 * p2) * Math.pow(t, 2.0);
+          const sideFlap = 0.25 * Math.pow(Math.abs(Math.cos(theta)), 1.8) * Math.pow(t, 2.2);
+          const frontOpen = -0.42 * Math.max(0.0, Math.sin(theta + 0.22)) * Math.pow(t, 1.5);
+
+          const fold = 0.028 * Math.sin(theta * 9.0 + t * 5.0) * (1.0 - Math.abs(t - 0.45));
+          const r = rBase + fold;
+          const x = r * Math.cos(theta);
+          const z = r * Math.sin(theta);
+          const y = yBase + backPeaks + sideFlap + frontOpen;
+
+          const n = norm([Math.cos(theta) + 0.25 * Math.cos(theta * 9.0), -0.12, Math.sin(theta)]);
+
+          let col, em;
+          if (t < 0.38 && Math.floor(iu / 5) % 2 === 0) {
+            col = COLORS.KRAFT_DARK;
+            em = 0.22;
+          } else if ((iu + Math.floor(iv / 4)) % 9 === 0) {
+            col = COLORS.KRAFT_DARK;
+            em = 0.24;
+          } else if (Math.sin(theta) > 0.15 && t > 0.40) {
+            col = COLORS.KRAFT_LIGHT;
+            em = 0.36;
+          } else {
+            col = COLORS.KRAFT_MID;
+            em = 0.30;
+          }
+          pts.push({ pos: [x, y, z], n, col, em });
+        }
+      }
+
+      // 2. Carta velina rosa cipria interna
+      for (let iv = 0; iv < 85; iv++) {
+        const t = iv / 84.0;
+        const yBase = -0.92 + t * 1.46;
+        const rBase = 0.17 + Math.pow(t, 1.12) * 0.78;
+        for (let iu = 0; iu < 155; iu++) {
+          const theta = (2.0 * Math.PI * iu) / 155;
+          const vp1 = Math.max(0.0, 1.0 - Math.abs(theta - (1.5 * Math.PI - 0.55)) * 1.55);
+          const vp2 = Math.max(0.0, 1.0 - Math.abs(theta - (1.5 * Math.PI + 0.25)) * 1.55);
+          const vellumPeaks = (0.58 * vp1 + 0.52 * vp2) * Math.pow(t, 1.8);
+          const frontCut = -0.38 * Math.max(0.0, Math.sin(theta + 0.25)) * Math.pow(t, 1.5);
+
+          const x = rBase * Math.cos(theta);
+          const z = rBase * Math.sin(theta);
+          const y = yBase + vellumPeaks + frontCut;
+          const n = norm([Math.cos(theta), 0.18, Math.sin(theta)]);
+
+          if (t > 0.90) {
+            pts.push({ pos: [x, y, z], n, col: COLORS.VELLUM_EDGE, em: 0.50 });
+          } else {
+            pts.push({ pos: [x, y, z], n, col: COLORS.VELLUM_PINK, em: 0.28 });
+          }
+        }
+      }
+
+      addWhiteBow(pts, -0.92, 0.33);
+
+      // 3. Base verde scura compatta
+      for (let r_i = 0; r_i < 10; r_i++) {
+        const rt = r_i / 9.0;
+        const rad = 0.10 + rt * 0.46;
+        const steps = Math.max(10, Math.floor(38 * rt));
+        for (let a_i = 0; a_i < steps; a_i++) {
+          const ang = (2.0 * Math.PI * a_i) / steps;
+          const bx = rad * Math.cos(ang) * 0.90;
+          const bz = rad * Math.sin(ang) * 0.80 + 0.10;
+          const by = 0.28 - 0.20 * Math.sin(ang) + 0.14 * (1.0 - rt);
+          pts.push({ pos: [bx, by, bz], n: [0.0, 1.0, 0.2], col: COLORS.LEAF_DARK, em: 0.08 });
+        }
+      }
+
+      // 4. Rose scolpite 3D
+      function addRose(center, tiltDir, tiltAngle, radius, colSpec, colHi, colMid, colSh) {
+        const axis = norm([
+          Math.sin(tiltAngle) * Math.cos(tiltDir),
+          Math.cos(tiltAngle),
+          Math.sin(tiltAngle) * Math.sin(tiltDir)
+        ]);
+        const ref = Math.abs(axis[0]) < 0.8 ? [1.0, 0.0, 0.0] : [0.0, 0.0, 1.0];
+        const uVec = norm(cross(axis, ref));
+        const vVec = cross(axis, uVec);
+
+        for (let b_i = 0; b_i < 8; b_i++) {
+          const bt = b_i / 7.0;
+          const bRad = radius * (0.35 + bt * 0.68);
+          const bH = radius * (bt * 0.32);
+          for (let a_i = 0; a_i < 26; a_i++) {
+            const ang = (2.0 * Math.PI * a_i) / 26;
+            const radial = add(mul(uVec, Math.cos(ang)), mul(vVec, Math.sin(ang)));
+            const pos = add(center, add(mul(axis, bH), mul(radial, bRad)));
+            const n = norm(add(radial, mul(axis, -0.45)));
+            pts.push({ pos, n, col: colSh, em: 0.08 });
+          }
+        }
+
+        const layers = 6;
+        for (let lay = 0; lay < layers; lay++) {
+          const lt = lay / (layers - 1);
+          const petalsInLayer = 3 + lay;
+          const baseR = radius * (0.14 + lt * 0.88);
+          for (let p = 0; p < petalsInLayer; p++) {
+            const pAng = (2.0 * Math.PI * p) / petalsInLayer + lay * 0.88;
+            for (let h_i = 0; h_i < 15; h_i++) {
+              const ht = h_i / 14.0;
+              const flare = 1.0 + 0.28 * lt * Math.pow(ht, 2.2);
+              const rCurr = baseR * (0.58 + 0.46 * Math.sin(ht * Math.PI * 0.72)) * flare;
+              const hCurr = radius * (0.85 - lt * 0.28) * ht + radius * 0.14 * (1.0 - lt);
+              const span = 0.66 - lt * 0.08;
+              for (let w_i = -6; w_i <= 6; w_i++) {
+                const wt = w_i / 6.0;
+                const ang = pAng + wt * span;
+                const curlR = 1.0 + 0.22 * Math.pow(ht, 2.5) * (1.0 - wt * wt);
+                const curlH = -0.06 * radius * Math.pow(ht, 3) * (1.0 - wt * wt) * lt;
+                const radial = add(mul(uVec, Math.cos(ang)), mul(vVec, Math.sin(ang)));
+                const pos = add(center, add(mul(axis, hCurr + curlH), mul(radial, rCurr * curlR)));
+                const n = norm(add(mul(radial, 0.75 + 0.45 * ht), mul(axis, 0.65 - 0.45 * ht * lt)));
+
+                let col, em;
+                if (ht > 0.84 && Math.abs(wt) < 0.72) {
+                  col = colSpec;
+                  em = 0.65;
+                } else if (ht > 0.64) {
+                  col = colHi;
+                  em = 0.42;
+                } else if (ht < 0.32 || Math.abs(wt) > 0.82) {
+                  col = colSh;
+                  em = 0.06;
+                } else {
+                  col = colMid;
+                  em = 0.24;
+                }
+                pts.push({ pos, n, col, em });
+              }
+            }
+          }
+        }
+      }
+
+      // 5. Crisantemi pompon sferici 3D
+      function addPompon(center, tiltDir, tiltAngle, radius) {
+        const axis = norm([
+          Math.sin(tiltAngle) * Math.cos(tiltDir),
+          Math.cos(tiltAngle),
+          Math.sin(tiltAngle) * Math.sin(tiltDir)
+        ]);
+        const ref = Math.abs(axis[0]) < 0.8 ? [1.0, 0.0, 0.0] : [0.0, 0.0, 1.0];
+        const uVec = norm(cross(axis, ref));
+        const vVec = cross(axis, uVec);
+
+        for (let r_i = 0; r_i < 9; r_i++) {
+          const rt = r_i / 8.0;
+          const phiC = rt * (Math.PI * 0.48);
+          const rad = radius * 0.36 * Math.sin(phiC);
+          const domeH = radius * (0.48 + 0.16 * Math.cos(phiC));
+          const steps = Math.max(8, Math.floor(30 * rt));
+          for (let a_i = 0; a_i < steps; a_i++) {
+            const ang = (2.0 * Math.PI * a_i) / steps;
+            const radial = add(mul(uVec, Math.cos(ang)), mul(vVec, Math.sin(ang)));
+            const pos = add(center, add(mul(axis, domeH), mul(radial, rad)));
+            const n = norm(add(mul(radial, Math.sin(phiC)), mul(axis, Math.cos(phiC))));
+            const col = rt > 0.78 ? COLORS.MUM_LIME_SH : COLORS.MUM_LIME_HI;
+            const em = rt > 0.78 ? 0.15 : 0.55;
+            pts.push({ pos, n, col, em });
+          }
+        }
+
+        const coronas = [
+          [0.28, 0.52, 12, 0.14],
+          [0.48, 0.74, 16, 0.12],
+          [0.68, 0.94, 20, 0.10],
+          [0.86, 1.04, 22, 0.09]
+        ];
+        coronas.forEach(([tStart, tEnd, numPetals, pWidth], cIdx) => {
+          for (let p = 0; p < numPetals; p++) {
+            const pAng = (2.0 * Math.PI * p) / numPetals + cIdx * 0.24;
+            for (let l_i = 0; l_i < 9; l_i++) {
+              const lt = l_i / 8.0;
+              const sT = tStart + (tEnd - tStart) * lt;
+              const phi = sT * (Math.PI * 0.62);
+              const rCurr = radius * Math.sin(phi);
+              const hCurr = radius * 0.64 * Math.cos(phi) + 0.025 * Math.sin(lt * Math.PI);
+              const wSpan = pWidth * Math.sin(lt * Math.PI * 0.85 + 0.25);
+
+              for (let w_i = -2; w_i <= 2; w_i++) {
+                const wt = w_i / 2.0;
+                const ang = pAng + wt * wSpan;
+                const radial = add(mul(uVec, Math.cos(ang)), mul(vVec, Math.sin(ang)));
+                const pos = add(center, add(mul(axis, hCurr), mul(radial, rCurr)));
+                const n = norm(add(mul(radial, Math.sin(phi)), mul(axis, Math.cos(phi))));
+
+                let col, em;
+                if (lt > 0.52 && Math.abs(wt) < 0.75 && sT < 0.88) {
+                  col = COLORS.MUM_WHITE_HI;
+                  em = 0.58;
+                } else if (sT >= 0.88) {
+                  col = COLORS.MUM_WHITE_SH;
+                  em = 0.08;
+                } else {
+                  col = COLORS.MUM_WHITE_MID;
+                  em = 0.24;
+                }
+                pts.push({ pos, n, col, em });
+              }
+            }
+          }
+        });
+      }
+
+      // Disposizione fiori
+      addRose([-0.14, 0.88, 0.02], 1.45, 0.46, 0.29, COLORS.ROSE_BLUSH_SPEC, COLORS.ROSE_BLUSH_HI, COLORS.ROSE_BLUSH_MID, COLORS.ROSE_BLUSH_SH);
+      addRose([-0.32, 0.64, 0.28], 1.70, 0.62, 0.32, COLORS.ROSE_RED_SPEC, COLORS.ROSE_RED_HI, COLORS.ROSE_RED_MID, COLORS.ROSE_RED_SH);
+      addRose([-0.58, 0.42, 0.34], 2.05, 0.75, 0.27, COLORS.ROSE_BLUSH_SPEC, COLORS.ROSE_BLUSH_HI, COLORS.ROSE_BLUSH_MID, COLORS.ROSE_BLUSH_SH);
+      addRose([-0.10, 0.48, 0.46], 1.50, 0.68, 0.27, COLORS.ROSE_BLUSH_SPEC, COLORS.ROSE_BLUSH_HI, COLORS.ROSE_BLUSH_MID, COLORS.ROSE_BLUSH_SH);
+      addRose([-0.42, 0.20, 0.56], 1.80, 0.84, 0.26, COLORS.ROSE_BLUSH_SPEC, COLORS.ROSE_BLUSH_HI, COLORS.ROSE_BLUSH_MID, COLORS.ROSE_BLUSH_SH);
+      addRose([-0.22, 0.03, 0.62], 1.60, 0.95, 0.24, COLORS.ROSE_BLUSH_SPEC, COLORS.ROSE_BLUSH_HI, COLORS.ROSE_BLUSH_MID, COLORS.ROSE_BLUSH_SH);
+
+      addPompon([0.24, 0.60, 0.34], 1.25, 0.62, 0.23);
+      addPompon([0.50, 0.45, 0.28], 0.85, 0.72, 0.22);
+      addPompon([0.20, 0.33, 0.55], 1.38, 0.78, 0.22);
+      addPompon([-0.05, 0.24, 0.63], 1.55, 0.88, 0.20);
+      addPompon([0.16, 0.07, 0.62], 1.32, 0.95, 0.21);
+
+      // Foglie discrete dietro alle rose
+      const leaves = [
+        [-0.22, 0.78, -0.18, 1.85, 0.42],
+        [0.18, 0.76, -0.20, 1.25, 0.44],
+        [0.36, 0.56, -0.06, 0.95, 0.32]
+      ];
+      for (const [lx0, ly0, lz0, angDir, length] of leaves) {
+        const dx = Math.cos(angDir) * 0.34;
+        const dz = Math.sin(angDir) * 0.34;
+        const pxDir = -Math.sin(angDir);
+        const pzDir = Math.cos(angDir);
+        for (let step = 0; step < 22; step++) {
+          const t = step / 21.0;
+          const wHalf = 0.13 * Math.sin(t * Math.PI);
+          const cx = lx0 + dx * t;
+          const cy = ly0 + length * t - 0.05 * (t * t);
+          const cz = lz0 + dz * t;
+          const nW = Math.max(1, Math.floor(wHalf * 55));
+          for (let wi = -nW; wi <= nW; wi++) {
+            const wt = wi / Math.max(1, nW);
+            const off = wt * wHalf;
+            const pos = [cx + pxDir * off, cy, cz + pzDir * off];
+            const n = norm([dx * 0.2, 0.35, 0.9]);
+            const col = Math.abs(wt) < 0.20 ? COLORS.LEAF_SHINE : COLORS.LEAF_DARK;
+            pts.push({ pos, n, col, em: 0.12 });
+          }
+        }
+      }
+
+      // Particelle luminose
+      const sparklePalette = [COLORS.ROSE_BLUSH_HI, COLORS.MUM_LIME_HI, COLORS.VELLUM_EDGE];
+      const sparkles = [];
+      for (let i = 0; i < 14; i++) {
+        const a = rand() * 2 * Math.PI;
+        const r = 1.08 + rand() * (1.52 - 1.08);
+        const y = -0.6 + rand() * (1.15 - (-0.6));
+        sparkles.push({
+          pos: [r * Math.cos(a), y, r * Math.sin(a)],
+          col: sparklePalette[Math.floor(rand() * sparklePalette.length)]
+        });
+      }
+
+      return { pts, sparkles };
+    }
+
+    const { pts, sparkles } = buildBouquet();
+    const lightDir = norm([0.55, 0.68, 0.48]);
+
+    let cols = 120;
+    let rows = 60;
+    let charW = 8;
+    let charH = 14;
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      canvas.width = vw * dpr;
+      canvas.height = vh * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Adatta la densità della griglia ASCII allo schermo (funziona sia su telefono che su PC)
+      const targetCols = vw < 600 ? 78 : 130;
+      charW = vw / targetCols;
+      charH = charW * 1.85;
+      cols = Math.floor(vw / charW);
+      rows = Math.floor(vh / charH);
+
+      ctx.font = `bold ${Math.ceil(charH * 0.95)}px "Courier New", Courier, monospace`;
+      ctx.textBaseline = "top";
+    }
+
+    window.addEventListener("resize", resize);
+    resize();
+
+    let t = 0.0;
+    let lastTime = 0;
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+      if (now - lastTime < 32) return; // ~30 fps fluidi
+      lastTime = now;
+
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      ctx.fillStyle = "#0b0b0e";
+      ctx.fillRect(0, 0, vw, vh);
+
+      const size = cols * rows;
+      const zBuf = new Float32Array(size).fill(-999.0);
+      const chBuf = new Array(size).fill(" ");
+      const colBuf = new Array(size).fill("");
+
+      const angleY = -0.15 + 0.55 * Math.sin(t);
+      const scale = Math.min(cols * 0.46, (rows - 5) * 0.86);
+      const aspectY = 0.52;
+
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const [rx, ry, rz] = rotateVec(p.pos, angleY);
+        const [nx, ny, nz] = rotateVec(p.n, angleY);
+
+        const depth = 4.05 - rz;
+        if (depth <= 0.2) continue;
+
+        const invZ = 1.0 / depth;
+        const sx = Math.floor(cols * 0.5 + rx * scale * invZ * 2.35);
+        const sy = Math.floor((rows - 5) * 0.52 - ry * scale * aspectY * invZ * 2.35);
+
+        if (sx >= 0 && sx < cols && sy >= 0 && sy < rows - 4) {
+          const idx = sy * cols + sx;
+          if (invZ > zBuf[idx]) {
+            zBuf[idx] = invZ;
+            const diff = Math.max(0.0, dot([nx, ny, nz], lightDir));
+            const shaded = Math.pow(diff, 1.35);
+            const lum = Math.min(0.99, p.em + shaded * (1.0 - p.em));
+            const cIdx = Math.floor(lum * (SHADE_CHARS.length - 1));
+            chBuf[idx] = SHADE_CHARS[cIdx];
+            colBuf[idx] = p.col;
+          }
+        }
+      }
+
+      for (let i = 0; i < sparkles.length; i++) {
+        const sp = sparkles[i];
+        const [rx, ry, rz] = rotateVec(sp.pos, angleY * 1.15);
+        const depth = 4.05 - rz;
+        if (depth > 0.2) {
+          const invZ = 1.0 / depth;
+          const sx = Math.floor(cols * 0.5 + rx * scale * invZ * 2.35);
+          const sy = Math.floor((rows - 5) * 0.52 - ry * scale * aspectY * invZ * 2.35);
+          if (sx >= 0 && sx < cols && sy >= 0 && sy < rows - 4) {
+            const idx = sy * cols + sx;
+            if (invZ > zBuf[idx]) {
+              zBuf[idx] = invZ;
+              chBuf[idx] = "*";
+              colBuf[idx] = sp.col;
+            }
+          }
+        }
+      }
+
+      // Disegno griglia ASCII su Canvas
+      const offsetX = (vw - cols * charW) * 0.5;
+      const offsetY = (vh - rows * charH) * 0.5;
+
+      for (let r = 0; r < rows - 4; r++) {
+        const py = offsetY + r * charH;
+        const rowOffset = r * cols;
+        for (let c = 0; c < cols; c++) {
+          const idx = rowOffset + c;
+          const ch = chBuf[idx];
+          if (ch !== " ") {
+            ctx.fillStyle = colBuf[idx];
+            ctx.fillText(ch, offsetX + c * charW, py);
+          }
+        }
+      }
+
+
+
+      t += 0.045;
+    }
+
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
